@@ -407,14 +407,20 @@ function calcWindowCount(flights) {
   if (h < 7) h += 24;
   const nowMin = h * 60 + m;
 
-  // 現在時刻の前30分〜後1時間の便
-  const inWindow = flights.filter(f =>
+  // 現在時刻の前30分と、後1時間を分けて集計
+  const before = flights.filter(f =>
     f.adjustedMinutes >= nowMin - 30 &&
+    f.adjustedMinutes < nowMin
+  );
+  const after = flights.filter(f =>
+    f.adjustedMinutes >= nowMin &&
     f.adjustedMinutes <= nowMin + 60
   );
   return {
-    total: inWindow.length,
-    intl: inWindow.filter(f => f.flightType === 'international').length,
+    before: before.length,
+    after: after.length,
+    intlBefore: before.filter(f => f.flightType === 'international').length,
+    intlAfter: after.filter(f => f.flightType === 'international').length,
   };
 }
 
@@ -436,8 +442,8 @@ function renderPanel(data) {
     const winEl = document.getElementById(winMap[g]);
     if (wc !== null) {
       const intlLine = (g === '4号乗り場')
-        ? `<br>(内国際線<span style="color:#e74c3c;font-size:13px;">${wc.intl}</span>便)` : '';
-      winEl.innerHTML = `前30分-後1h: <span style="color:#e74c3c;font-size:13px;">+${wc.total}便</span>${intlLine}`;
+        ? `<br>(内国際線<span style="color:#e74c3c;font-size:13px;">${wc.intlBefore}+${wc.intlAfter}</span>便)` : '';
+      winEl.innerHTML = `前30分-後1h: <span style="color:#e74c3c;font-size:13px;">${wc.before}+${wc.after}便</span>${intlLine}`;
     } else {
       winEl.textContent = '';
     }
