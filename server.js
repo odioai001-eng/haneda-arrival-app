@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = process.env.PORT || 3000;
-const PASSWORD = process.env.APP_PASSWORD || '4923';
+const PASSWORD = process.env.APP_PASSWORD || '1862';
 const SESSION_TOKEN = require('crypto').randomBytes(32).toString('hex');
 
 // Aircraft IATA type code → typical total seat count
