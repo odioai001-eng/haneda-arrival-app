@@ -416,11 +416,21 @@ function calcWindowCount(flights) {
     f.adjustedMinutes >= nowMin &&
     f.adjustedMinutes <= nowMin + 60
   );
+
+  // 「後1h」の便を到着済み／運行中／遅延で仕訳
+  const statusOf = f => f.status && f.status.category;
+  const afterArrived = after.filter(f => statusOf(f) === 'arrived').length;
+  const afterDelayed = after.filter(f => statusOf(f) === 'delayed').length;
+  const afterNormal = after.filter(f => statusOf(f) !== 'arrived' && statusOf(f) !== 'delayed' && statusOf(f) !== 'canceled').length;
+
   return {
     before: before.length,
     after: after.length,
     intlBefore: before.filter(f => f.flightType === 'international').length,
     intlAfter: after.filter(f => f.flightType === 'international').length,
+    afterArrived,
+    afterNormal,
+    afterDelayed,
   };
 }
 
@@ -443,7 +453,8 @@ function renderPanel(data) {
     if (wc !== null) {
       const intlLine = (g === '4号乗り場')
         ? `<br>(内国際線<span style="color:#e74c3c;font-size:13px;">${wc.intlBefore}+${wc.intlAfter}</span>便)` : '';
-      winEl.innerHTML = `前30分-後1h:<br><span style="color:#e74c3c;font-size:13px;">${wc.before}+${wc.after}便</span>${intlLine}`;
+      const breakdownLine = `<br><span style="font-size:9px;color:#666;font-weight:400;">後1h内訳 到着済${wc.afterArrived}/運行中${wc.afterNormal}/遅延${wc.afterDelayed}</span>`;
+      winEl.innerHTML = `前30分-後1h:<br><span style="color:#e74c3c;font-size:13px;">${wc.before}+${wc.after}便</span>${intlLine}${breakdownLine}`;
     } else {
       winEl.textContent = '';
     }
