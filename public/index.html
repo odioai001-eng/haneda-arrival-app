@@ -453,7 +453,7 @@ function renderPanel(data) {
     if (wc !== null) {
       const intlLine = (g === '4号乗り場')
         ? `<br>(内国際線<span style="color:#e74c3c;font-size:13px;">${wc.intlBefore}+${wc.intlAfter}</span>便)` : '';
-      const breakdownLine = `<br><span style="font-size:9px;color:#666;font-weight:400;">後1h内訳 到着済${wc.afterArrived}/運行中${wc.afterNormal}/遅延${wc.afterDelayed}</span>`;
+      const breakdownLine = `<br><span style="font-size:9px;color:#666;font-weight:400;">後1h内訳<br>到着済${wc.afterArrived}<br>運行中${wc.afterNormal}<br>遅延${wc.afterDelayed}</span>`;
       winEl.innerHTML = `前30分-後1h:<br><span style="color:#e74c3c;font-size:13px;">${wc.before}+${wc.after}便</span>${intlLine}${breakdownLine}`;
     } else {
       winEl.textContent = '';
