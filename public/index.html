@@ -420,6 +420,7 @@ function calcWindowCount(flights) {
   // 「後1h」の便を到着済み／運行中／遅延／天候不良／欠航で仕訳
   const statusOf = f => f.status && f.status.category;
   const isWeather = f => /天候/.test((f.status && f.status.text) || '');
+  const beforeArrived = before.filter(f => statusOf(f) === 'arrived').length;
   const afterArrived = after.filter(f => statusOf(f) === 'arrived').length;
   const afterWeather = after.filter(f => statusOf(f) !== 'arrived' && statusOf(f) !== 'canceled' && isWeather(f)).length;
   const afterDelayed = after.filter(f => statusOf(f) === 'delayed' && !isWeather(f)).length;
@@ -432,7 +433,8 @@ function calcWindowCount(flights) {
     after: after.length,
     intlBefore: before.filter(f => f.flightType === 'international').length,
     intlAfter: after.filter(f => f.flightType === 'international').length,
-    afterArrived,
+    // 到着済みは前30分＋後1hの合計
+    arrivedTotal: beforeArrived + afterArrived,
     afterNormal,
     afterDelayed,
     afterWeather,
@@ -459,14 +461,20 @@ function renderPanel(data) {
     if (wc !== null) {
       const intlLine = (g === '4号乗り場')
         ? `<br>(内国際線<span style="color:#e74c3c;font-size:13px;">${wc.intlBefore}+${wc.intlAfter}</span>便)` : '';
-      const breakdownLine = `<br><span style="font-size:9px;color:#666;font-weight:400;">後1h内訳<br>到着済${wc.afterArrived}<br>運行中${wc.afterNormal}<br>遅延${wc.afterDelayed}<br>天候不良${wc.afterWeather}<br><br>欠航${wc.allCanceled}</span>`;
+      const breakdownLine = `<br><span style="font-size:9px;color:#666;font-weight:400;">後1h内訳<br>到着済${wc.arrivedTotal}<br>運行中${wc.afterNormal}<br>遅延${wc.afterDelayed}<br>天候不良${wc.afterWeather}<br><br>欠航${wc.allCanceled}</span>`;
       winEl.innerHTML = `前30分-後1h:<br><span style="color:#e74c3c;font-size:13px;">${wc.before}+${wc.after}便</span>${intlLine}${breakdownLine}`;
     } else {
       winEl.textContent = '';
     }
   });
 
-  const flights = gates[currentGate] || [];
+  // リストは現在時刻の30分前の便を先頭にする
+  const now0 = new Date();
+  let h0 = now0.getHours(), m0 = now0.getMinutes();
+  if (h0 < 7) h0 += 24;
+  const nowMin0 = h0 * 60 + m0;
+  const allFlights = gates[currentGate] || [];
+  const flights = allFlights.filter(f => f.adjustedMinutes >= nowMin0 - 30);
   const info = GATE_INFO[currentGate];
 
   let html = `<div class="panel active">
