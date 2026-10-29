@@ -468,13 +468,7 @@ function renderPanel(data) {
     }
   });
 
-  // リストは現在時刻の30分前の便を先頭にする
-  const now0 = new Date();
-  let h0 = now0.getHours(), m0 = now0.getMinutes();
-  if (h0 < 7) h0 += 24;
-  const nowMin0 = h0 * 60 + m0;
-  const allFlights = gates[currentGate] || [];
-  const flights = allFlights.filter(f => f.adjustedMinutes >= nowMin0 - 30);
+  const flights = gates[currentGate] || [];
   const info = GATE_INFO[currentGate];
 
   let html = `<div class="panel active">
@@ -565,12 +559,12 @@ function scrollToCurrentTime() {
     const cm = parseInt(parts[1]);
     if (ch < 7) ch += 24;
     const cardMin = ch * 60 + cm;
-    if (cardMin >= nowMin) targetCard = card;
+    if (cardMin >= nowMin - 30) targetCard = card;
   });
 
   if (targetCard) {
     setTimeout(() => {
-      targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 300);
   }
 }
