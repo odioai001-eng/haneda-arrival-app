@@ -332,7 +332,10 @@ function switchTab(gate) {
   document.querySelectorAll('.tab').forEach(t => {
     t.classList.toggle('active', t.dataset.gate === gate);
   });
-  if (lastData) renderPanel(lastData);
+  if (lastData) {
+    renderPanel(lastData);
+    scrollToCurrentTime();
+  }
 }
 
 function statusClass(cat) {
