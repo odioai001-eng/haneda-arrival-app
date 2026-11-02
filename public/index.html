@@ -423,10 +423,12 @@ function calcWindowCount(flights) {
   // 「後1h」の便を到着済み／運行中／遅延／天候不良／欠航で仕訳
   const statusOf = f => f.status && f.status.category;
   const isWeather = f => /天候/.test((f.status && f.status.text) || '');
-  const afterArrived = after.filter(f => statusOf(f) === 'arrived').length;
-  const afterWeather = after.filter(f => statusOf(f) !== 'arrived' && statusOf(f) !== 'canceled' && isWeather(f)).length;
-  const afterDelayed = after.filter(f => statusOf(f) === 'delayed' && !isWeather(f)).length;
-  const afterNormal = after.filter(f => statusOf(f) !== 'arrived' && statusOf(f) !== 'delayed' && statusOf(f) !== 'canceled' && !isWeather(f)).length;
+  // 「手荷物引渡中」も到着済みとして扱う
+  const isArrived = f => statusOf(f) === 'arrived' || /手荷物/.test((f.status && f.status.text) || '');
+  const afterArrived = after.filter(f => isArrived(f)).length;
+  const afterWeather = after.filter(f => !isArrived(f) && statusOf(f) !== 'canceled' && isWeather(f)).length;
+  const afterDelayed = after.filter(f => statusOf(f) === 'delayed' && !isArrived(f) && !isWeather(f)).length;
+  const afterNormal = after.filter(f => !isArrived(f) && statusOf(f) !== 'delayed' && statusOf(f) !== 'canceled' && !isWeather(f)).length;
   // 欠航は時間帯で絞らず、この乗り場の全便から集計
   const allCanceled = flights.filter(f => statusOf(f) === 'canceled').length;
 

@@ -222,10 +222,12 @@ function computeWindowCounts(flights, nowMin) {
   const after = flights.filter(f => f.adjustedMinutes >= nowMin && f.adjustedMinutes <= nowMin + 60);
   const statusOf = f => f.status && f.status.category;
   const isWeather = f => /天候/.test((f.status && f.status.text) || '');
-  const afterArrived = after.filter(f => statusOf(f) === 'arrived').length;
-  const afterWeather = after.filter(f => statusOf(f) !== 'arrived' && statusOf(f) !== 'canceled' && isWeather(f)).length;
-  const afterDelayed = after.filter(f => statusOf(f) === 'delayed' && !isWeather(f)).length;
-  const afterNormal = after.filter(f => statusOf(f) !== 'arrived' && statusOf(f) !== 'delayed' && statusOf(f) !== 'canceled' && !isWeather(f)).length;
+  // 「手荷物引渡中」も到着済みとして扱う
+  const isArrived = f => statusOf(f) === 'arrived' || /手荷物/.test((f.status && f.status.text) || '');
+  const afterArrived = after.filter(f => isArrived(f)).length;
+  const afterWeather = after.filter(f => !isArrived(f) && statusOf(f) !== 'canceled' && isWeather(f)).length;
+  const afterDelayed = after.filter(f => statusOf(f) === 'delayed' && !isArrived(f) && !isWeather(f)).length;
+  const afterNormal = after.filter(f => !isArrived(f) && statusOf(f) !== 'delayed' && statusOf(f) !== 'canceled' && !isWeather(f)).length;
   const allCanceled = flights.filter(f => statusOf(f) === 'canceled').length;
   return {
     before: before.length,
