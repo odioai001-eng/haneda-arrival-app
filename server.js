@@ -305,7 +305,8 @@ function serveStatic(req, res) {
   const mime = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css' }[ext] || 'text/plain';
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': mime });
+    // ブラウザの古いキャッシュが使われて更新内容が反映されないことがあったため、常に最新を取得させる
+    res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache, no-store, must-revalidate' });
     res.end(data);
   });
 }
