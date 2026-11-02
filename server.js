@@ -46,8 +46,14 @@ function postJson(url, body, referer) {
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', d => data += d);
-      res.on('end', () => resolve(JSON.parse(data)));
+      res.on('end', () => {
+        // 空港側がメンテナンス等でJSON以外（HTMLなど）を返した時に、サーバーごと落ちないよう、解析の失敗は呼び出し元に返す
+        try { resolve(JSON.parse(data)); } catch (e) { reject(new Error('空港のAPIの応答を解析できません（HTTP ' + res.statusCode + '）')); }
+      });
+      res.on('error', reject);
     });
+    // 応答が返ってこない時に、取得中のまま待ち続けないようにする
+    req.setTimeout(15000, () => req.destroy(new Error('空港のAPIの応答がありません（15秒）')));
     req.on('error', reject);
     req.write(bodyStr);
     req.end();
@@ -171,6 +177,115 @@ async function fetchFlights(dateStr) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// 数字だけを返す公開用の窓口  GET /api/counts
+//
+// チームアプリ（イチバン羽田チームアプリ）の地図画面に、各乗り場の「前30分-後1h」の便数を出すためのもの。
+// 画面（public/index.html）の calcWindowCount() と同じ計算を、サーバー側で行って返す。
+// ・返すのは便数の集計だけ（便名・出発地などは返さない）なので、パスワード無しで見られる（他の窓口は、これまでどおりパスワードが要る）
+// ・何人が見ても、空港のAPIへの問い合わせは、日付ごとに55秒に1回まで（取得結果を使い回す）。問い合わせに失敗した時は、
+//   10分以内の取得結果があれば、古くてもそれで答える（stale:true）
+// ・「いま」は日本時間。乗り場の一覧は、朝7時に日が替わる（7:00-29:00軸。朝7時前は前日の一覧）
+// ---------------------------------------------------------------------------
+const COUNTS_CACHE_MS = 55 * 1000;
+const COUNTS_STALE_MAX_MS = 10 * 60 * 1000;
+const GATE_NAMES = ['1号乗り場', '2号乗り場', '3号乗り場', '4号乗り場'];
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const flightsCache = new Map();    // 日付(YYYYMMDD) -> { at, data }
+const flightsInflight = new Map(); // 日付 -> 取得中のPromise（同時に来た分は、1回の問い合わせにまとめる）
+let fetchFlightsImpl = fetchFlights; // 試験で差し替える
+let nowFn = () => Date.now();        // 試験で差し替える
+
+function jstParts(ms) {
+  const d = new Date(ms + JST_OFFSET_MS); // ずらした日時のUTCの値＝日本時間の値（日本に夏時間は無い）
+  return { y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(), h: d.getUTCHours(), mi: d.getUTCMinutes() };
+}
+
+// いま使う一覧の日付。朝7時（日本時間）に替わる。朝7時前は、前日の一覧
+function businessDateStr(ms) {
+  const base = jstParts(ms).h >= 7 ? ms : ms - 24 * 60 * 60 * 1000;
+  const q = jstParts(base);
+  return `${q.y}${String(q.mo).padStart(2, '0')}${String(q.d).padStart(2, '0')}`;
+}
+
+// いまの時刻（日本時間）を、7:00-29:00軸の「分」にしたもの（朝7時前は24時間足す。toMinutesと同じ）
+function nowMinutesOnAxis(ms) {
+  const p = jstParts(ms);
+  const h = p.h < 7 ? p.h + 24 : p.h;
+  return h * 60 + p.mi;
+}
+
+// public/index.html の calcWindowCount() と同じ計算（便が無い乗り場は null）
+function computeWindowCounts(flights, nowMin) {
+  if (!flights || flights.length === 0) return null;
+  const before = flights.filter(f => f.adjustedMinutes >= nowMin - 30 && f.adjustedMinutes < nowMin);
+  const after = flights.filter(f => f.adjustedMinutes >= nowMin && f.adjustedMinutes <= nowMin + 60);
+  const statusOf = f => f.status && f.status.category;
+  const isWeather = f => /天候/.test((f.status && f.status.text) || '');
+  const afterArrived = after.filter(f => statusOf(f) === 'arrived').length;
+  const afterWeather = after.filter(f => statusOf(f) !== 'arrived' && statusOf(f) !== 'canceled' && isWeather(f)).length;
+  const afterDelayed = after.filter(f => statusOf(f) === 'delayed' && !isWeather(f)).length;
+  const afterNormal = after.filter(f => statusOf(f) !== 'arrived' && statusOf(f) !== 'delayed' && statusOf(f) !== 'canceled' && !isWeather(f)).length;
+  const allCanceled = flights.filter(f => statusOf(f) === 'canceled').length;
+  return {
+    before: before.length,
+    beforeDisplay: before.length + afterArrived, // 前30分の表示数には、後1hのうち既に到着済みの便も合算する
+    after: after.length,
+    intlBefore: before.filter(f => f.flightType === 'international').length,
+    intlAfter: after.filter(f => f.flightType === 'international').length,
+    arrivedTotal: afterArrived,
+    afterNormal,
+    afterDelayed,
+    afterWeather,
+    allCanceled,
+  };
+}
+
+async function getFlightsCached(dateStr, nowMs) {
+  const hit = flightsCache.get(dateStr);
+  if (hit && nowMs - hit.at >= 0 && nowMs - hit.at < COUNTS_CACHE_MS) return { data: hit.data, at: hit.at, stale: false };
+  let p = flightsInflight.get(dateStr);
+  if (!p) {
+    p = fetchFlightsImpl(dateStr)
+      .then(data => { const entry = { at: nowFn(), data }; flightsCache.set(dateStr, entry); return entry; })
+      .finally(() => flightsInflight.delete(dateStr));
+    flightsInflight.set(dateStr, p);
+  }
+  try {
+    const entry = await p;
+    return { data: entry.data, at: entry.at, stale: false };
+  } catch (e) {
+    if (hit && nowMs - hit.at < COUNTS_STALE_MAX_MS) return { data: hit.data, at: hit.at, stale: true };
+    throw e;
+  }
+}
+
+async function handleCounts(req, res) {
+  const headers = {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*', // 便数の集計だけ（公開の空港情報）なので、どのページからでも読める
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Max-Age': '86400',
+    'Cache-Control': 'no-store',
+  };
+  if (req.method === 'OPTIONS') { res.writeHead(204, headers); res.end(); return; }
+  if (req.method !== 'GET') { res.writeHead(405, headers); res.end(JSON.stringify({ ok: false, error: 'method not allowed' })); return; }
+  try {
+    const nowMs = nowFn();
+    const dateStr = businessDateStr(nowMs);
+    const { data, at, stale } = await getFlightsCached(dateStr, nowMs);
+    const nowMin = nowMinutesOnAxis(nowMs);
+    const gates = {};
+    GATE_NAMES.forEach(g => { gates[g] = computeWindowCounts((data.gates || {})[g] || [], nowMin); });
+    res.writeHead(200, headers);
+    res.end(JSON.stringify({ ok: true, date: dateStr, now: new Date(nowMs).toISOString(), nowMinutes: nowMin, fetchedAt: new Date(at).toISOString(), stale, gates }));
+  } catch (e) {
+    console.error('counts failed', e);
+    res.writeHead(502, headers);
+    res.end(JSON.stringify({ ok: false, error: 'upstream failed' }));
+  }
+}
+
 // SVGアイコンをPNGとして返す（簡易版）
 function serveIcon(res, size) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
@@ -239,6 +354,9 @@ function loginPage(error) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // 数字だけを返す公開用の窓口（パスワード無し・CORS可）
+  if (req.url.split('?')[0] === '/api/counts') { await handleCounts(req, res); return; }
+
   // ログイン処理
   if (req.method === 'POST' && req.url === '/login') {
     let body = '';
@@ -293,7 +411,16 @@ const server = http.createServer(async (req, res) => {
   serveStatic(req, res);
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`羽田空港 乗り場別到着便ビューアー`);
-  console.log(`http://localhost:${PORT}`);
-});
+// 試験から読み込んだ時は、起動しない
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`羽田空港 乗り場別到着便ビューアー`);
+    console.log(`http://localhost:${PORT}`);
+  });
+}
+
+module.exports = {
+  server, computeWindowCounts, businessDateStr, nowMinutesOnAxis, postJson,
+  __setFetchFlights(fn) { fetchFlightsImpl = fn; flightsCache.clear(); flightsInflight.clear(); },
+  __setNow(fn) { nowFn = fn; },
+};
