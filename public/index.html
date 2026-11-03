@@ -570,7 +570,14 @@ function scrollToCurrentTime() {
 
   if (targetCard) {
     setTimeout(() => {
-      targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // sticky表示のヘッダー・タブ（後1h内訳の分だけ縦に伸びている）に隠れないよう、
+      // その高さを差し引いた位置までスクロールする
+      const stickyHeader = document.querySelector('.header');
+      const stickyTabs = document.querySelector('.tabs');
+      const stickyHeight = (stickyHeader ? stickyHeader.getBoundingClientRect().height : 0)
+        + (stickyTabs ? stickyTabs.getBoundingClientRect().height : 0);
+      const targetTop = targetCard.getBoundingClientRect().top + window.scrollY - stickyHeight - 8;
+      window.scrollTo({ top: Math.max(targetTop, 0), behavior: 'smooth' });
     }, 300);
   }
 }
